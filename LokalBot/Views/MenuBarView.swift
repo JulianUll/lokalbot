@@ -19,13 +19,10 @@ struct MenuBarLabel: View {
     }
 
     @ViewBuilder private var glyph: some View {
-        if app.isRecording {
-            HStack(spacing: 3) {
-                Image(systemName: "record.circle.fill")
-                MeetingRecordingTimerText(recording: app.recording)
-            }
-                .monospacedDigit()
-        } else if app.dictation.state.isRecording {
+        // Local preference: keep the plain brand mark while a meeting is being
+        // recorded — no record dot, no elapsed timer. macOS still shows its own
+        // orange microphone indicator, so an active capture stays discoverable.
+        if app.dictation.state.isRecording {
             Text("\(Image(systemName: "mic.circle.fill")) \(app.dictation.menuBarLabel)")
                 .monospacedDigit()
         } else if app.dictation.state.isWorking {
