@@ -138,6 +138,55 @@ final class ModelCatalogTests: XCTestCase {
         XCTAssertTrue(body.contains("name=\"language\"\r\n\r\nen\r\n"), body)
     }
 
+    /// llama.cpp only appends the bare ISO code to the ASR prompt, which is
+    /// too weak to stop a 2B speech LLM from answering German audio in
+    /// English. The prompt has to name the language and rule out translation.
+    func testGraniteSpeechPromptNamesTheTranscriptionLanguage() {
+        let german = GraniteSpeechEngine.prompt(for: "de")
+
+        XCTAssertTrue(german.contains("German"), german)
+        XCTAssertTrue(german.contains("Do not translate"), german)
+        XCTAssertFalse(german.contains("de "), "the raw ISO code is not a language name")
+        XCTAssertEqual(GraniteSpeechEngine.prompt(for: "fr").contains("French"), true)
+        XCTAssertTrue(GraniteSpeechEngine.prompt(for: nil).contains("Do not translate"))
+        XCTAssertFalse(GraniteSpeechEngine.prompt(for: nil).contains("German"))
+    }
+
+    /// Left unset the endpoint samples, and the same span came back as three
+    /// different sentences. Transcription has to decode greedily.
+    func testGraniteSpeechRequestPinsGreedyDecoding() throws {
+        let wav = FileManager.default.temporaryDirectory
+            .appendingPathComponent("granite-temp-\(UUID().uuidString).wav")
+        try Data([0x52, 0x49, 0x46, 0x46]).write(to: wav)
+        defer { try? FileManager.default.removeItem(at: wav) }
+
+        let request = try GraniteSpeechEngine.makeTranscriptionRequest(
+            serverBaseURL: URL(string: "http://127.0.0.1:17875/v1")!,
+            authenticationToken: "granite-secret",
+            boundary: "granite-temp-boundary",
+            wav: wav,
+            language: "de")
+
+        let body = String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"temperature\"\r\n\r\n0\r\n"), body)
+        XCTAssertTrue(body.contains("German"), body)
+    }
+
+    /// Sub-second windows come back as fluent invention ("Es gibt keine
+    /// Verbindung." for 0.46 s of noise), so they never reach the model.
+    func testGraniteSpeechDropsSpansTooShortToTranscribe() {
+        let spans = [
+            SpeechSpan(start: 0, end: 0.46),
+            SpeechSpan(start: 1, end: 1.72),
+            SpeechSpan(start: 3, end: 4.0),
+            SpeechSpan(start: 5, end: 20),
+        ]
+
+        let kept = GraniteSpeechEngine.transcribableSpans(spans)
+
+        XCTAssertEqual(kept, [SpeechSpan(start: 3, end: 4.0), SpeechSpan(start: 5, end: 20)])
+    }
+
     func testGraniteSpeechRequestOmitsLanguageHintInAutoMode() throws {
         let wav = FileManager.default.temporaryDirectory
             .appendingPathComponent("granite-auto-\(UUID().uuidString).wav")

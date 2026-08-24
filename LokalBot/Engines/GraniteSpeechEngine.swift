@@ -13,8 +13,15 @@ actor GraniteSpeechEngine: TranscriptionEngine {
 
     nonisolated static let modelFileName =
         GraniteSpeechModelConfiguration.defaultModel.localModelFileName
-    private static let prompt = "transcribe the speech with proper punctuation and capitalization."
     private static let maxSegmentSeconds = 30.0
+    /// Granite is an instruction-tuned LLM, not a CTC decoder: handed a window
+    /// too short to carry an utterance it never returns nothing, it invents a
+    /// fluent sentence ("Es gibt keine Verbindung." for 0.46 s of room noise).
+    /// Measured at temperature 0, so this is the model, not sampling luck —
+    /// every probe below a second came back fabricated. Those spans never
+    /// reach it. The price is losing one-word backchannels ("Ja.", "Okay.");
+    /// for an evidence-backed library, dropping them beats inventing lines.
+    static let minSegmentSeconds = 1.0
     private static let serverPort = 17_875
 
     private var server: LlamaServer?
@@ -83,8 +90,8 @@ actor GraniteSpeechEngine: TranscriptionEngine {
         defer { releaseConfigurationUse() }
         try await prepareCurrentConfiguration(configuration, progress: nil)
         let started = Date()
-        let regions = try await SpeechActivity.shared.spans(
-            in: url, maxSegmentSeconds: Self.maxSegmentSeconds)
+        let regions = Self.transcribableSpans(try await SpeechActivity.shared.spans(
+            in: url, maxSegmentSeconds: Self.maxSegmentSeconds))
         let work = try Self.makeWorkDir()
         defer { try? FileManager.default.removeItem(at: work) }
 
@@ -104,6 +111,12 @@ actor GraniteSpeechEngine: TranscriptionEngine {
         return Transcript(
             segments: segments,
             engine: "\(configuration.repository):\(configuration.model.path) (llama.cpp)")
+    }
+
+    /// Spans long enough for Granite to transcribe rather than confabulate.
+    /// Pure, so the threshold is unit-testable without audio.
+    nonisolated static func transcribableSpans(_ spans: [SpeechSpan]) -> [SpeechSpan] {
+        spans.filter { $0.end - $0.start >= minSegmentSeconds }
     }
 
     private func server(for paths: PreparedPaths) -> LlamaServer {
@@ -356,6 +369,24 @@ actor GraniteSpeechEngine: TranscriptionEngine {
         return text
     }
 
+    /// The ASR instruction. Granite Speech picks between transcription and
+    /// speech *translation* purely from the prompt wording, and llama.cpp only
+    /// appends the bare ISO code (`" (language: %s)"`) — far too weak a hint
+    /// for a 2B model, which then answers in English for German audio. Naming
+    /// the language in words and ruling out translation keeps it verbatim.
+    nonisolated static func prompt(for language: String?) -> String {
+        // Auto-detect has no wording that reliably holds the model: with no
+        // concrete language named it still answers some German spans in
+        // English. Granite needs an explicit transcription language.
+        guard let language, !language.isEmpty,
+              let name = LanguageCode(rawValue: language)?.summaryDisplayName else {
+            return "Transcribe the speech verbatim, in the language spoken. "
+                + "Do not translate. Use proper punctuation and capitalization."
+        }
+        return "Transcribe the \(name) speech verbatim, in \(name). "
+            + "Do not translate. Use proper punctuation and capitalization."
+    }
+
     nonisolated static func makeTranscriptionRequest(
         serverBaseURL: URL,
         authenticationToken: String,
@@ -388,7 +419,14 @@ actor GraniteSpeechEngine: TranscriptionEngine {
         LocalLlamaServerAuthentication.apply(to: &request, token: authenticationToken)
         var fields = [
             "model": modelFileName,
-            "prompt": Self.prompt,
+            "prompt": Self.prompt(for: language),
+            // Greedy decoding. Left unset, the endpoint samples: the same span
+            // transcribed three times came back as three different sentences.
+            // `temperature` is the only sampler knob this endpoint accepts
+            // from a multipart field (it runs `stof` over the string);
+            // repeat_penalty/top_p/seed are read from a JSON body and reject a
+            // form field with HTTP 400, so they cannot be set from here.
+            "temperature": "0",
         ]
         if let language, !language.isEmpty {
             // llama.cpp's transcription endpoint appends this ISO language
