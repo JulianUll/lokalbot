@@ -355,11 +355,22 @@ struct SettingsView: View {
 
     @ViewBuilder private var processingSection: some View {
             if shows("Processing", ["transcribe", "transcription", "summarize", "summary",
-                                    "automatic", "auto", "after meeting", "model", "models", "engine"]) {
+                                    "automatic", "auto", "after meeting", "model", "models", "engine",
+                                    "echo", "echo cancellation", "speakers", "headphones",
+                                    "voice processing", "microphone", "bleed"]) {
                 Section("Processing") {
                     Toggle("Transcribe automatically after each meeting", isOn: $app.settings.autoTranscribe)
                     Toggle("Summarize automatically after transcription", isOn: $app.settings.autoSummarize)
                     Text("Choose transcription and main LLM models in the Models tab.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Divider()
+                    Toggle("Remove the other side from your microphone track",
+                           isOn: $app.settings.echoCancellation)
+                    Text("On speakers the remote voice reaches your microphone too and gets transcribed a second time as you. Subtracts the system-audio track before transcription — including for meetings already recorded. No effect on headphones.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("Cancel echo while recording (changes the recording)",
+                           isOn: $app.settings.microphoneVoiceProcessing)
+                    Text("Routes the microphone through macOS voice processing, which also applies noise suppression and automatic gain — a cleaner transcript, a less faithful recording. Applies to new recordings only.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }

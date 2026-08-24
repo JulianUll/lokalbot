@@ -218,6 +218,12 @@ final class MicRecorder {
     // Recreated per session — a reused engine can hold a stale graph after
     // device changes and then fails with kAudioDeviceUnsupportedFormat ('!dev').
     private var engine = AVAudioEngine()
+
+    /// Engage Apple's Voice Processing IO on the input node, which cancels the
+    /// Mac's own playback out of the microphone signal in hardware. Set before
+    /// `start()`; a device switch mid-meeting rebuilds the graph with the same
+    /// choice. Changing it has no effect on a capture already running.
+    var voiceProcessingEnabled = false
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
@@ -299,6 +305,22 @@ final class MicRecorder {
         }
     }
 
+    /// A fresh capture graph with echo cancellation engaged when asked for.
+    /// VPIO renegotiates the input node's format, so it has to be turned on
+    /// before anybody reads that format. Hardware that refuses it falls back
+    /// to plain capture: a missing echo canceller is a worse recording, a
+    /// failed `start()` is no recording at all.
+    private func makeEngine() -> AVAudioEngine {
+        let engine = AVAudioEngine()
+        guard voiceProcessingEnabled else { return engine }
+        do {
+            try engine.inputNode.setVoiceProcessingEnabled(true)
+        } catch {
+            NSLog("MicRecorder could not enable voice processing: \(error.localizedDescription)")
+        }
+        return engine
+    }
+
     /// `previewTee` mirrors the capture into a snapshot-safe PCM `.caf` for
     /// the live meeting transcript — best-effort, never fails the recording.
     func start(writingTo url: URL, previewTee previewURL: URL? = nil) throws {
@@ -311,7 +333,7 @@ final class MicRecorder {
         ioQueue.sync { activeCaptureGraphID = nil }
         bufferPoolBroker?.clear()
         bufferPoolBroker = nil
-        engine = AVAudioEngine()
+        engine = makeEngine()
         let inputFormat = engine.inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw RecorderError.inputUnavailable
@@ -442,7 +464,7 @@ final class MicRecorder {
             recoverySilenceCommitGate.cancel()
         }
 
-        let replacementEngine = AVAudioEngine()
+        let replacementEngine = makeEngine()
         engine = replacementEngine
         let inputFormat = replacementEngine.inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {

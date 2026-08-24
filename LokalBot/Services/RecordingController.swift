@@ -268,6 +268,9 @@ final class RecordingController: ObservableObject {
                 }
                 created = meeting
                 try Task.checkCancellation()
+                // Read once, here: the graph is rebuilt on device changes and
+                // must keep the choice the meeting started with.
+                micRecorder.voiceProcessingEnabled = settings.microphoneVoiceProcessing
                 try micRecorder.start(
                     writingTo: meeting.folderURL(in: storage).appendingPathComponent("mic.m4a"),
                     previewTee: meeting.folderURL(in: storage)

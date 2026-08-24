@@ -333,6 +333,28 @@ struct AppSettings: Codable, Equatable {
     /// of post-processing per meeting.
     var multiSpeakerDiarization: Bool = true
 
+    // MARK: - Echo cancellation
+
+    /// Route the microphone through Apple's Voice Processing IO, which cancels
+    /// what the Mac is playing back out of the input signal at the hardware
+    /// level. Only helps someone on speakers, and it is not free: VPIO also
+    /// applies automatic gain control and noise suppression, so it audibly
+    /// changes the recording. Off by default, and it can only affect
+    /// recordings made while it is on.
+    var microphoneVoiceProcessing: Bool = false
+
+    /// Subtract the system-audio track from the microphone track before
+    /// transcription, using an adaptive filter. Unlike `microphoneVoiceProcessing`
+    /// this works on meetings that are already recorded, at the cost of a codec
+    /// generation: both tracks are AAC by then. Harmless with headphones —
+    /// with no echo to find, the filter converges to silence and passes the
+    /// microphone through.
+    ///
+    /// Off by default while the filter is new: it rewrites the microphone track
+    /// every transcription takes as input, so a bad pass is not something the
+    /// user can see went wrong. Worth turning on when recording on speakers.
+    var echoCancellation: Bool = false
+
     // MARK: - Cotyping (inline AI autocomplete)
 
     /// Master switch. Off by default — cotyping needs Accessibility + Input
@@ -618,6 +640,8 @@ struct AppSettings: Codable, Equatable {
         case noteTemplate
         case summaryLanguage
         case multiSpeakerDiarization
+        case microphoneVoiceProcessing
+        case echoCancellation
         case cotypingEnabled
         case cotypingUserName
         case cotypingStyleNote
@@ -770,6 +794,8 @@ struct AppSettings: Codable, Equatable {
         try c.encode(noteTemplate, forKey: .noteTemplate)
         try c.encode(summaryLanguage, forKey: .summaryLanguage)
         try c.encode(multiSpeakerDiarization, forKey: .multiSpeakerDiarization)
+        try c.encode(microphoneVoiceProcessing, forKey: .microphoneVoiceProcessing)
+        try c.encode(echoCancellation, forKey: .echoCancellation)
         try c.encode(cotypingEnabled, forKey: .cotypingEnabled)
         try c.encode(cotypingUserName, forKey: .cotypingUserName)
         try c.encode(cotypingStyleNote, forKey: .cotypingStyleNote)
@@ -902,6 +928,9 @@ struct AppSettings: Codable, Equatable {
         noteTemplate = decode(.noteTemplate, defaults.noteTemplate)
         summaryLanguage = decode(.summaryLanguage, defaults.summaryLanguage)
         multiSpeakerDiarization = decode(.multiSpeakerDiarization, defaults.multiSpeakerDiarization)
+        microphoneVoiceProcessing = decode(.microphoneVoiceProcessing,
+                                           defaults.microphoneVoiceProcessing)
+        echoCancellation = decode(.echoCancellation, defaults.echoCancellation)
         cotypingEnabled = decode(.cotypingEnabled, defaults.cotypingEnabled)
         cotypingUserName = decode(.cotypingUserName, defaults.cotypingUserName)
         cotypingStyleNote = decode(.cotypingStyleNote, defaults.cotypingStyleNote)
