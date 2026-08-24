@@ -86,3 +86,6 @@ lokalbot video ad handoff/
 # Raycast extension generated files and local install
 Distribution/raycast/raycast-env.d.ts
 Distribution/raycast/node_modules/
+
+# Local engine-comparison notes and transcript dumps kept beside the checkout.
+/*.txt
