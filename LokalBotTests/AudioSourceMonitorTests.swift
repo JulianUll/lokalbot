@@ -156,9 +156,26 @@ final class AudioSourceMonitorTests: XCTestCase {
                                               bundleID: "com.microsoft.teams2",
                                               pid: host.id)
 
+        // Capture must reach it — that is what this namespace rule is for.
+        MeetingDetector.resetCaptureTargetMemory()
         XCTAssertEqual(
-            MeetingDetector.bestOutputAudioProcess(for: app, in: [host, moduleHost])?.id,
+            MeetingDetector.captureTargetProcess(for: app, in: [host, moduleHost])?.id,
             moduleHost.id)
+
+        // Detection must not. modulehost reports output while Teams merely
+        // runs (20/20 samples, idle), so its state says nothing about a call;
+        // the two questions are answered by different lookups on purpose.
+        XCTAssertNil(MeetingDetector.bestOutputAudioProcess(for: app, in: [host, moduleHost]))
+
+        // A helper emitting *is* evidence, and detection picks that up.
+        let helper = AudioProcess(id: 400,
+                                  name: "Microsoft Teams WebView",
+                                  bundleID: "com.microsoft.teams2.helper",
+                                  objectID: AudioObjectID(400),
+                                  isRunningOutput: true)
+        XCTAssertEqual(
+            MeetingDetector.bestOutputAudioProcess(for: app, in: [host, moduleHost, helper])?.id,
+            helper.id)
     }
 
     /// Measured on a real Teams call: `translatePIDToProcessObject` fails for
