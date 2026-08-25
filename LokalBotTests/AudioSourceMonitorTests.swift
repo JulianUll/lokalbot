@@ -358,6 +358,50 @@ final class AudioSourceMonitorTests: XCTestCase {
             for: app, in: [lowestPIDHelper, moduleHost]))
     }
 
+    /// What the watchdog needs to escape a dead tap: excluding the PID it has
+    /// proved useless must hand back a *different* process, not the same one.
+    func testCaptureTargetCanBeAskedToLookPastADeadTarget() {
+        MeetingDetector.resetCaptureTargetMemory()
+        let app = teamsApp()
+        let dead = teamsHelper(8392)
+        let moduleHost = AudioProcess(id: 8400,
+                                      name: "Microsoft Teams ModuleHost",
+                                      bundleID: "com.microsoft.teams2.modulehost",
+                                      objectID: AudioObjectID(8400),
+                                      isRunningOutput: true)
+
+        XCTAssertEqual(
+            MeetingDetector.captureTargetProcess(for: app, in: [dead, moduleHost],
+                                                 excluding: [dead.id])?.id,
+            moduleHost.id)
+        // Exclusion also has to beat an emitting process, or the watchdog would
+        // keep landing on a tap that demonstrably delivers nothing.
+        let emittingButDead = AudioProcess(id: 8392, name: "Microsoft Teams WebView",
+                                           bundleID: "com.microsoft.teams2.helper",
+                                           objectID: AudioObjectID(8392),
+                                           isRunningOutput: true)
+        MeetingDetector.resetCaptureTargetMemory()
+        XCTAssertEqual(
+            MeetingDetector.captureTargetProcess(for: app, in: [emittingButDead, moduleHost],
+                                                 excluding: [emittingButDead.id])?.id,
+            moduleHost.id)
+    }
+
+    /// With nothing else in the namespace the exclusion finds nothing, which is
+    /// what lets the caller fall back to retrying the same target rather than
+    /// silently giving up on system audio.
+    func testCaptureTargetExclusionCanLeaveNothing() {
+        MeetingDetector.resetCaptureTargetMemory()
+        let app = teamsApp()
+        let only = teamsHelper(8392)
+
+        XCTAssertNil(MeetingDetector.captureTargetProcess(for: app, in: [only],
+                                                          excluding: [only.id]))
+        XCTAssertEqual(
+            MeetingDetector.captureTargetProcess(for: app, in: [only])?.id,
+            only.id)
+    }
+
     /// An open stream outranks a closed one, but a helper that is genuinely
     /// emitting still outranks both — it is the process detection trusts.
     func testCaptureTargetStillPrefersAnEmittingHelperOverAnAlwaysOpenSibling() {

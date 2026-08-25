@@ -614,7 +614,15 @@ final class RecordingController: ObservableObject {
             return
         }
 
-        guard let candidate = currentSystemAudioCandidate(for: target) else {
+        // A tap that has not delivered a single buffer since it attached is not
+        // quiet: it is pointed at a process with no open output stream, and no
+        // amount of waiting turns that into audio. Look past it first, and only
+        // fall back to it when the namespace holds nothing else.
+        let resolved = health.hasDeliveredSinceAttach
+            ? currentSystemAudioCandidate(for: target)
+            : currentSystemAudioCandidate(for: target, excluding: [target.pid])
+                ?? currentSystemAudioCandidate(for: target)
+        guard let candidate = resolved else {
             warnOnceAboutSilentSystemAudio(elapsed: elapsed, captured: health.duration,
                                            audible: health.audibleDuration,
                                            rms: health.lastRMSLevel,
@@ -655,7 +663,7 @@ final class RecordingController: ObservableObject {
             }
             didWarnAboutSilentSystemAudio = false
             lokalbotLog(
-                "system audio reattached oldPID=\(previousPID) newPID=\(candidate.id) bundle=\(candidate.bundleID ?? "unknown") captured=\(String(format: "%.2fs", health.duration)) audible=\(String(format: "%.2fs", health.audibleDuration)) silentFor=\(String(format: "%.2fs", silentFor)) rms=\(String(format: "%.6f", health.lastRMSLevel)) peakRMS=\(String(format: "%.6f", health.peakRMSLevel))")
+                "system audio reattached oldPID=\(previousPID) newPID=\(candidate.id) bundle=\(candidate.bundleID ?? "unknown") delivered=\(health.hasDeliveredSinceAttach) captured=\(String(format: "%.2fs", health.duration)) audible=\(String(format: "%.2fs", health.audibleDuration)) silentFor=\(String(format: "%.2fs", silentFor)) rms=\(String(format: "%.6f", health.lastRMSLevel)) peakRMS=\(String(format: "%.6f", health.peakRMSLevel))")
         } catch {
             lastSystemAudioReattachAt = now
             onError("System audio capture was interrupted (\(error.localizedDescription)); still recording microphone.")
@@ -671,11 +679,14 @@ final class RecordingController: ObservableObject {
     /// meant a tap attached to a helper with no open stream — which yields zero
     /// frames, forever — had no candidate to move to, and stayed there for the
     /// whole meeting after warning once.
-    private func currentSystemAudioCandidate(for target: SystemAudioTarget) -> AudioProcess? {
-        MeetingDetector.currentCaptureTargetProcess(for: MeetingDetector.DetectedApp(
-            name: target.bundleID,
-            bundleID: target.bundleID,
-            pid: target.pid))
+    private func currentSystemAudioCandidate(for target: SystemAudioTarget,
+                                             excluding excluded: Set<pid_t> = []) -> AudioProcess? {
+        MeetingDetector.currentCaptureTargetProcess(
+            for: MeetingDetector.DetectedApp(
+                name: target.bundleID,
+                bundleID: target.bundleID,
+                pid: target.pid),
+            excluding: excluded)
     }
 
     /// Helper processes routinely exit during a live browser/Zoom meeting.

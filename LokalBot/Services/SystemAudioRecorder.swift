@@ -41,6 +41,11 @@ final class SystemAudioRecorder {
     private var outputURL: URL?
     private var framesWritten: AVAudioFramePosition = 0
     private var audibleFramesWritten: AVAudioFramePosition = 0
+    /// Frames the *current* tap has delivered, reset by every attach and not
+    /// advanced by recovery silence. Zero means the tap is pointed at a process
+    /// with no open output stream: it receives no buffers at all, so unlike a
+    /// merely quiet capture it cannot start working later.
+    private var framesSinceAttach: AVAudioFramePosition = 0
     private var recordingSampleRate: Double = 0
     private var lastAudioWriteAt: Date?
     private var lastAudioWriteInstant: ContinuousClock.Instant?
@@ -75,6 +80,8 @@ final class SystemAudioRecorder {
     struct CaptureHealth {
         let duration: TimeInterval
         let audibleDuration: TimeInterval
+        /// Whether the tap attached last has delivered any buffer at all.
+        let hasDeliveredSinceAttach: Bool
         let lastAudioWriteAt: Date?
         let lastAudibleWriteAt: Date?
         let capturedPID: pid_t
@@ -98,6 +105,7 @@ final class SystemAudioRecorder {
             ioQueue.sync {
                 framesWritten = 0
                 audibleFramesWritten = 0
+                framesSinceAttach = 0
                 recordingSampleRate = 0
                 lastAudioWriteAt = nil
                 lastAudioWriteInstant = nil
@@ -155,6 +163,7 @@ final class SystemAudioRecorder {
                 : 0
             return CaptureHealth(duration: duration,
                                  audibleDuration: audibleDuration,
+                                 hasDeliveredSinceAttach: framesSinceAttach > 0,
                                  lastAudioWriteAt: lastAudioWriteAt,
                                  lastAudibleWriteAt: lastAudibleWriteAt,
                                  capturedPID: capturedPID,
@@ -165,6 +174,11 @@ final class SystemAudioRecorder {
     }
 
     private func attachTap(processObject: AudioObjectID, writingTo url: URL) throws {
+        // A fresh tap starts a fresh delivery count. Deliberately after the
+        // recovery silence a reattach writes, so padding never reads as the new
+        // tap having produced something.
+        ioQueue.sync { framesSinceAttach = 0 }
+
         // 2. Create a stereo-mixdown tap on that process only.
         let tapDescription = CATapDescription(stereoMixdownOfProcesses: [processObject])
         tapDescription.uuid = UUID()
@@ -261,6 +275,7 @@ final class SystemAudioRecorder {
                     let now = Date()
                     let nowInstant = ContinuousClock.now
                     self.framesWritten += AVAudioFramePosition(copy.frameLength)
+                    self.framesSinceAttach += AVAudioFramePosition(copy.frameLength)
                     self.lastAudioWriteAt = now
                     self.lastAudioWriteInstant = nowInstant
                     self.lastRMSLevel = rmsLevel
@@ -347,6 +362,7 @@ final class SystemAudioRecorder {
         ioQueue.sync {
             framesWritten = 0
             audibleFramesWritten = 0
+            framesSinceAttach = 0
             recordingSampleRate = 0
             lastAudioWriteAt = nil
             lastAudioWriteInstant = nil

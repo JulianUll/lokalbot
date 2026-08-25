@@ -567,8 +567,16 @@ final class MeetingDetector {
     /// object at all, so `AudioHardwarePropertyTranslatePIDToProcessObject`
     /// fails and the tap is refused with `processNotFound` whenever the meeting
     /// happens to be quiet at the moment recording starts.
+    ///
+    /// `excluding` drops processes the caller has already proved useless — the
+    /// watchdog passes the PID of a tap that has delivered nothing at all — so
+    /// the search cannot hand back the same dead target on every retry.
     static func captureTargetProcess(for app: DetectedApp,
-                                     in processes: [AudioProcess]) -> AudioProcess? {
+                                     in processes: [AudioProcess],
+                                     excluding excluded: Set<pid_t> = []) -> AudioProcess? {
+        let processes = excluded.isEmpty
+            ? processes
+            : processes.filter { !excluded.contains($0.id) }
         let namespace = processes.filter { process in
             guard let bundleID = process.bundleID else { return false }
             return audioBundleID(bundleID, belongsTo: app.bundleID)
@@ -651,8 +659,9 @@ final class MeetingDetector {
         nativeMeetingApp(in: running, requireAudio: false)
     }
 
-    static func currentCaptureTargetProcess(for app: DetectedApp) -> AudioProcess? {
-        captureTargetProcess(for: app, in: currentAudioProcesses())
+    static func currentCaptureTargetProcess(for app: DetectedApp,
+                                            excluding excluded: Set<pid_t> = []) -> AudioProcess? {
+        captureTargetProcess(for: app, in: currentAudioProcesses(), excluding: excluded)
     }
 
     static func currentAudioProcesses(now: Date = Date()) -> [AudioProcess] {
