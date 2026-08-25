@@ -589,13 +589,30 @@ final class MeetingDetector {
            let process = namespace.first(where: { $0.id == remembered }) {
             return process
         }
-        // Still nothing known: siblings before the host, for the same reason
-        // the browser branch prefers helpers — the host is the process least
-        // likely to own audio, and for Teams it owns no Core Audio object at
-        // all. Lowest PID within each group so the choice is at least stable
-        // across the retries the watchdog makes.
-        let siblings = namespace.filter { $0.bundleID != app.bundleID }
-        return siblings.min { $0.id < $1.id } ?? namespace.min { $0.id < $1.id }
+        // Nothing is emitting *as detection counts it*. An open output stream
+        // still separates a process that can deliver buffers from one that
+        // cannot: a tap on a process with no stream open produces nothing at
+        // all — not even silence — so it stays at zero frames however long the
+        // call runs, while a tap on an open-but-silent stream starts carrying
+        // audio the moment someone speaks. That is why the always-open bundles
+        // detection has to ignore are welcome here; `alwaysOpenAudioBundles`
+        // answers the "is a call running" question, not this one.
+        if let open = preferredCaptureProcess(in: namespace.filter(\.isRunningOutput),
+                                              hostBundleID: app.bundleID) {
+            return open
+        }
+        // Still nothing known: fall back to the namespace as a whole.
+        return preferredCaptureProcess(in: namespace, hostBundleID: app.bundleID)
+    }
+
+    /// Siblings before the host, for the same reason the browser branch prefers
+    /// helpers — the host is the process least likely to own audio, and for
+    /// Teams it owns no Core Audio object at all. Lowest PID within each group
+    /// so the choice is at least stable across the retries the watchdog makes.
+    private static func preferredCaptureProcess(in processes: [AudioProcess],
+                                                hostBundleID: String) -> AudioProcess? {
+        let siblings = processes.filter { $0.bundleID != hostBundleID }
+        return siblings.min { $0.id < $1.id } ?? processes.min { $0.id < $1.id }
     }
 
     /// The PID each app was last seen emitting from. Small and per-bundle: it

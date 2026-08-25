@@ -663,8 +663,16 @@ final class RecordingController: ObservableObject {
         }
     }
 
+    /// Where the watchdog may move a tap that is not delivering. This asks the
+    /// *capture* question, not the detection one: detection ignores bundles
+    /// that hold their output stream open for the app's whole lifetime
+    /// (`alwaysOpenAudioBundles`), and on Teams that is routinely the process
+    /// the call audio actually comes out of. Asking the detection question here
+    /// meant a tap attached to a helper with no open stream — which yields zero
+    /// frames, forever — had no candidate to move to, and stayed there for the
+    /// whole meeting after warning once.
     private func currentSystemAudioCandidate(for target: SystemAudioTarget) -> AudioProcess? {
-        MeetingDetector.currentOutputAudioProcess(for: MeetingDetector.DetectedApp(
+        MeetingDetector.currentCaptureTargetProcess(for: MeetingDetector.DetectedApp(
             name: target.bundleID,
             bundleID: target.bundleID,
             pid: target.pid))
@@ -711,7 +719,10 @@ final class RecordingController: ObservableObject {
     private func retargetSystemAudio(to app: MeetingDetector.DetectedApp) {
         guard isRecording else { return }
         MeetingDetector.invalidateAudioProcessSnapshot()
-        guard let candidate = MeetingDetector.currentOutputAudioProcess(for: app) else { return }
+        // Capture lookup, not detection: the meeting has moved to this app, so
+        // the tap belongs in its namespace whether or not it happens to be
+        // emitting in this instant.
+        guard let candidate = MeetingDetector.currentCaptureTargetProcess(for: app) else { return }
         if systemAudioTarget?.bundleID == app.bundleID,
            systemAudioTarget?.pid == candidate.id { return }
         do {

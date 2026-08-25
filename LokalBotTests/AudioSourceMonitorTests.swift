@@ -331,6 +331,54 @@ final class AudioSourceMonitorTests: XCTestCase {
         XCTAssertEqual(forward, second.id)
     }
 
+    /// Measured on a 27-minute Teams call that recorded no system audio at
+    /// all: the tap went to `com.microsoft.teams2.helper` pid 8392 — the
+    /// lowest-PID sibling — and logged `captured=0.00s` for the whole meeting,
+    /// while `modulehost` was the process holding an output stream open. A tap
+    /// on a process with no open stream receives no buffers whatsoever, so it
+    /// cannot start working later; an always-open sibling at least carries the
+    /// audio once it flows. Detection still has to ignore `modulehost`, which
+    /// is a different question from where to point the tap.
+    func testCaptureTargetPrefersAnOpenStreamOverASiblingWithNone() {
+        MeetingDetector.resetCaptureTargetMemory()
+        let app = teamsApp()
+        let lowestPIDHelper = teamsHelper(8392)
+        let moduleHost = AudioProcess(id: 8400,
+                                      name: "Microsoft Teams ModuleHost",
+                                      bundleID: "com.microsoft.teams2.modulehost",
+                                      objectID: AudioObjectID(8400),
+                                      isRunningOutput: true)
+
+        XCTAssertEqual(
+            MeetingDetector.captureTargetProcess(for: app, in: [lowestPIDHelper, moduleHost])?.id,
+            moduleHost.id)
+        // Detection is unchanged: an always-open stream is still no evidence
+        // that a call is running.
+        XCTAssertNil(MeetingDetector.bestOutputAudioProcess(
+            for: app, in: [lowestPIDHelper, moduleHost]))
+    }
+
+    /// An open stream outranks a closed one, but a helper that is genuinely
+    /// emitting still outranks both — it is the process detection trusts.
+    func testCaptureTargetStillPrefersAnEmittingHelperOverAnAlwaysOpenSibling() {
+        MeetingDetector.resetCaptureTargetMemory()
+        let app = teamsApp()
+        let moduleHost = AudioProcess(id: 300,
+                                      name: "Microsoft Teams ModuleHost",
+                                      bundleID: "com.microsoft.teams2.modulehost",
+                                      objectID: AudioObjectID(300),
+                                      isRunningOutput: true)
+        let emitting = AudioProcess(id: 8449,
+                                    name: "Microsoft Teams WebView",
+                                    bundleID: "com.microsoft.teams2.helper",
+                                    objectID: AudioObjectID(8449),
+                                    isRunningOutput: true)
+
+        XCTAssertEqual(
+            MeetingDetector.captureTargetProcess(for: app, in: [moduleHost, emitting])?.id,
+            emitting.id)
+    }
+
     // MARK: - Capture target for a recording started by hand
 
     /// A hand-started recording has no detected app, but the tap still needs a
